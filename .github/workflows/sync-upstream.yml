@@ -1,0 +1,51 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'enginJie/guoapp2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.UPSTREAM_SYNC_TOKEN || github.token }}
+
+      - name: Sync from Xanerix/guoapp
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/Xanerix/guoapp.git
+          git fetch upstream main
+
+          behind=$(git rev-list --count HEAD..upstream/main)
+          if [ "$behind" -eq 0 ]; then
+            echo "Already up to date with Xanerix/guoapp:main."
+            exit 0
+          fi
+
+          echo "Found $behind new commit(s) on Xanerix/guoapp:main. Merging..."
+          if ! git merge --no-edit upstream/main; then
+            echo "::error::Merge conflict while syncing from Xanerix/guoapp:main. Please resolve manually."
+            exit 1
+          fi
+
+          if ! git push origin HEAD:main; then
+            echo "::error::Push failed. If upstream modified .github/workflows/, configure a PAT with 'repo' and 'workflow' scopes in repository secret UPSTREAM_SYNC_TOKEN."
+            exit 1
+          fi
